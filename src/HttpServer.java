@@ -1,39 +1,138 @@
-import java.net.*;
 import java.io.*;
-import java.nio.charset.StandardCharsets;
+import java.net.*;
+import java.util.*;
 
-public class HttpServer {
-    public static void main(String[] args) throws IOException {
-        String imagePath = "C:\\Users\\João Santos\\IdeaProjects\\SocketJavaTCP\\src\\meme.png";
-        int port = 1234;
-        ServerSocket serverSocket = new ServerSocket(port);
-        System.err.println("Servidor rodando na porta: " + port);
+public class HttpServer extends Thread {
 
-        while (true)
-        {
-            Socket client = serverSocket.accept();
-            System.err.println("Cliente Conectado! :)");
+    static final String HTML_START =
+            "<html>" +
+                    "<title>Servidor HTTP em java</title>" +
+                    "<body>";
 
-            BufferedReader in = new BufferedReader(new InputStreamReader(client.getInputStream()));
-            String s;
-            while ((s = in.readLine()) !=null )
+    static final String HTML_END =
+            "</body>" +
+                    "</html>";
+
+    Socket connectedClient;
+    BufferedReader inFromClient = null;
+    DataOutputStream outToClient = null;
+
+
+    public HttpServer(Socket client) {
+        connectedClient = client;
+    }
+
+    public void run() {
+
+        try {
+
+            System.out.println( "O Cliente "+
+                    connectedClient.getInetAddress() + ":" + connectedClient.getPort() + " está conectado");
+
+            inFromClient = new BufferedReader(new InputStreamReader (connectedClient.getInputStream()));
+            outToClient = new DataOutputStream(connectedClient.getOutputStream());
+
+            String requestString = inFromClient.readLine();
+            String headerLine = requestString;
+
+            StringTokenizer tokenizer = new StringTokenizer(headerLine);
+            String httpMethod = tokenizer.nextToken();
+            String httpQueryString = tokenizer.nextToken();
+
+            StringBuffer responseBuffer = new StringBuffer();
+            responseBuffer.append("<b> Página principal .... </b><BR>");
+            responseBuffer.append("A requisição do cliente é ....<BR>");
+
+            System.out.println("A Requisição HTTP é ....");
+            while (inFromClient.ready())
             {
-                System.out.println(s);
-                if (s.isEmpty())
-                {
-                    break;
+                // Read the HTTP complete HTTP Query
+                responseBuffer.append(requestString + "<BR>");
+                System.out.println(requestString);
+                requestString = inFromClient.readLine();
+            }
+
+            if (httpMethod.equals("GET")) {
+                if (httpQueryString.equals("/")) {
+                    // The default home page
+                    sendResponse(200, responseBuffer.toString(), false);
+                } else {
+//This is interpreted as a file name
+                    String fileName = httpQueryString.replaceFirst("/", "");
+                    fileName = URLDecoder.decode(fileName);
+                    if (new File(fileName).isFile()){
+                        sendResponse(200, fileName, true);
+                    }
+                    else {
+                        sendResponse(404, "<b>O conteúdo não foi encontrado ...." +
+                                "Usage: http://127.0.0.1:1234 or http://127.0.0.1:1234/</b>", false);
+                    }
                 }
             }
-            OutputStream clientOutput = client.getOutputStream();
-            clientOutput.write("HTTP/1.1 200 OK\r\n".getBytes());
-            clientOutput.write("\r\n".getBytes());
-            clientOutput.write("<h1> Socket é top eeeeem </h1>".getBytes());
-            clientOutput.write("\r\n\r\n".getBytes());
-            clientOutput.flush();
+            else sendResponse(404, "<b>O conteúdo não foi encontrado ...." +
+                    "Usage: http://127.0.0.1:1234 or http://127.0.0.1:1234/</b>", false);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
 
-            System.err.println("Conexão de Cliente fechada! :(");
-            in.close();
-            clientOutput.close();
+    public void sendResponse (int statusCode, String responseString, boolean isFile) throws Exception {
+
+        String statusLine;
+        String serverdetails = "Server: Java HTTPServer";
+        String contentLengthLine = null;
+        String fileName;
+        String contentTypeLine = "Content-Type: text/html" + "\r\n";
+        FileInputStream fin = null;
+
+        if (statusCode == 200)
+            statusLine = "HTTP/1.1 200 OK" + "\r\n";
+        else
+            statusLine = "HTTP/1.1 404 Not Found" + "\r\n";
+
+        if (isFile) {
+            fileName = responseString;
+            fin = new FileInputStream(fileName);
+            contentLengthLine = "Content-Length: " + Integer.toString(fin.available()) + "\r\n";
+            if (!fileName.endsWith(".htm") && !fileName.endsWith(".html"))
+                contentTypeLine = "Content-Type: \r\n";
+        }
+        else {
+            responseString = HttpServer.HTML_START + responseString + HttpServer.HTML_END;
+            contentLengthLine = "Content-Length: " + responseString.length() + "\r\n";
+        }
+
+        outToClient.writeBytes(statusLine);
+        outToClient.writeBytes(serverdetails);
+        outToClient.writeBytes(contentTypeLine);
+        outToClient.writeBytes(contentLengthLine);
+        outToClient.writeBytes("Conexão Encerrada!\r\n");
+        outToClient.writeBytes("\r\n");
+
+        if (isFile) sendFile(fin, outToClient);
+        else outToClient.writeBytes(responseString);
+
+        outToClient.close();
+    }
+
+    public void sendFile (FileInputStream fin, DataOutputStream out) throws Exception {
+        byte[] buffer = new byte[1024] ;
+        int bytesRead;
+
+        while ((bytesRead = fin.read(buffer)) != -1 ) {
+            out.write(buffer, 0, bytesRead);
+        }
+        fin.close();
+    }
+
+    public static void main (String args[]) throws Exception {
+
+        ServerSocket Server = new ServerSocket (1234, 10, InetAddress.getByName("127.0.0.1"));
+        System.out.println ("Esperando conexão na porta: 1234");
+
+        while(true) {
+            Socket connected = Server.accept();
+            (new HttpServer(connected)).start();
         }
     }
 }
